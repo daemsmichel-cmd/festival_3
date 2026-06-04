@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Festival Finder{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <header class="site-header">
+        <div class="shell site-header__inner">
+            <div>
+                <a class="brand" href="{{ url_for('index') }}">Festival Finder</a>
+                <p class="brand__meta">Band check-ins with GPS and crowd-view photos.</p>
+                <p class="brand__device-name" data-device-display-name hidden>
+                    This device:
+                    <span data-device-display-name-value></span>
+                </p>
+            </div>
+            <div class="site-header__actions">
+                <a class="header-link" href="{{ url_for('index') }}">All bands</a>
+                <a class="header-link" href="{{ url_for('admin_page') }}">Admin</a>
+            </div>
+        </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <section class="flash-band">
+                <div class="shell flash-stack">
+                    {% for category, message in messages %}
+                        <div class="flash flash--{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endif %}
+    {% endwith %}
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+        <div class="shell site-footer__inner">
+            <p>Upload the band slot, then let friends check in from the crowd.</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/device_profile.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

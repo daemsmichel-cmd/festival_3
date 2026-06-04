@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}Festival Finder{% endblock %}
+
+{% block content %}
+    <section class="shell tab-strip" aria-label="Festival Finder sections">
+        <a
+            class="tab-chip{% if active_tab == 'overview' %} tab-chip--active{% endif %}"
+            href="{{ url_for('index', tab='overview') }}"
+        >Timetable overview</a>
+        <a
+            class="tab-chip{% if active_tab == 'manage' %} tab-chip--active{% endif %}"
+            href="{{ url_for('admin_page') }}"
+        >Manage timetable</a>
+    </section>
+
+    {% if active_tab == "manage" %}
+        <section class="shell manage-grid">
+            <section class="section-panel">
+                <div class="section-header">
+                    <div>
+                        <p class="section-kicker">Import timetable</p>
+                        <h2>Excel CSV import</h2>
+                    </div>
+                    <p class="section-header__meta">Export the Excel sheet as CSV, then upload it here.</p>
+                </div>
+
+                <form class="stack-form" method="post" action="{{ url_for('import_bands') }}" enctype="multipart/form-data">
+                    <div class="field-grid">
+                        <label class="field">
+                            <span>Festival</span>
+                            <input type="text" name="festival_name" placeholder="Rock Werchter" required>
+                        </label>
+
+                        <label class="field">
+                            <span>Date</span>
+                            <input type="date" name="performance_date" required>
+                        </label>
+                    </div>
+
+                    <label class="field">
+                        <span>CSV file</span>
+                        <input type="file" name="timetable_import_file" accept=".csv,.txt,text/csv" required>
+                    </label>
+
+                    <div class="import-note">
+                        <p>Column order:</p>
+                        <code>stage | start | end | band name</code>
+                        <p>Headers are optional. Comma, semicolon, and tab-separated exports work.</p>
+                    </div>
+
+                    <button class="primary-button" type="submit">Import timetable from CSV</button>
+                </form>
+            </section>
+
+            <section class="section-panel section-panel--sticky">
+                <div class="section-header">
+                    <div>
+                        <p class="section-kicker">Manual add</p>
+                        <h2>Upload single band</h2>
+                    </div>
+                    <p class="section-header__meta">Create one slot with optional timetable file or notes.</p>
+                </div>
+
+                <form class="stack-form" method="post" action="{{ url_for('create_band') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="next" value="{{ url_for('index', tab='manage') }}">
+
+                    <div class="field-grid">
+                        <label class="field">
+                            <span>Band name</span>
+                            <input type="text" name="band_name" placeholder="The National" required>
+                        </label>
+
+                        <label class="field">
+                            <span>Festival</span>
+                            <input type="text" name="festival_name" placeholder="Rock Werchter" required>
+                        </label>
+
+                        <label class="field">
+                            <span>Stage</span>
+                            <input type="text" name="stage_name" placeholder="Main Stage">
+                        </label>
+
+                        <label class="field">
+                            <span>Date</span>
+                            <input type="date" name="performance_date" required>
+                        </label>
+
+                        <label class="field">
+                            <span>Start</span>
+                            <input type="time" name="start_time" required>
+                        </label>
+
+                        <label class="field">
+                            <span>End</span>
+                            <input type="time" name="end_time">
+                        </label>
+                    </div>
+
+                    <label class="field">
+                        <span>Timetable notes</span>
+                        <textarea name="timetable_notes" rows="4" placeholder="Set notes, meeting details, or stage changes"></textarea>
+                    </label>
+
+                    <label class="field">
+                        <span>Timetable file</span>
+                        <input type="file" name="timetable_file" accept=".pdf,image/*">
+                    </label>
+
+                    <button class="primary-button" type="submit">Add band to timetable</button>
+                </form>
+            </section>
+        </section>
+
+        <section class="shell detail-stack">
+            <section class="section-panel">
+                <div class="section-header">
+                    <div>
+                        <p class="section-kicker">Delete stage</p>
+                        <h2>Stage lanes</h2>
+                    </div>
+                    <p class="section-header__meta">Delete one festival-day stage and every band/check-in attached to it.</p>
+                </div>
+
+                {% if stage_groups %}
+                    {% for day in stage_groups %}
+                        <section class="stage-day">
+                            <div class="stage-day__header">
+                                <h3>{{ day["date"] | readable_date }}</h3>
+                            </div>
+
+                            <div class="stage-list">
+                                {% for stage in day["stages"] %}
+                                    <article class="stage-card">
+                                        <div class="stage-card__copy">
+                                            <div>
+                                                <p class="section-kicker">Stage lane</p>
+                                                <h4>{{ stage["stage_name_display"] }}</h4>
+                                            </div>
+                                            <p class="stage-card__meta">{{ stage["festival_name"] }}</p>
+                                            <p class="stage-card__meta">{{ stage["time_range"] }} · {{ stage["band_count"] }} bands · {{ stage["attendee_count"] }} crowd check-ins · {{ stage["favorite_count"] }} favorites</p>
+                                        </div>
+
+                                        <form method="post" action="{{ url_for('delete_stage') }}">
+                                            <input type="hidden" name="performance_date" value="{{ stage['performance_date'] }}">
+                                            <input type="hidden" name="festival_name" value="{{ stage['festival_name'] }}">
+                                            <input type="hidden" name="stage_name_value" value="{{ stage['stage_name_value'] }}">
+                                            <button class="secondary-button secondary-button--compact danger-button" type="submit">Delete stage</button>
+                                        </form>
+                                    </article>
+                                {% endfor %}
+                            </div>
+                        </section>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <h3>No stages to manage yet</h3>
+                        <p>Import a timetable CSV or add a band manually to create the first stage lane.</p>
+                    </div>
+                {% endif %}
+            </section>
+        </section>
+    {% else %}
+        <section class="shell workspace-grid workspace-grid--single">
+            <section class="section-panel">
+                <div class="section-header">
+                    <div>
+                        <p class="section-kicker">Band timeline</p>
+                        <h2>Timetable overview</h2>
+                    </div>
+                </div>
+
+                {% if schedule_days %}
+                    {% for day in schedule_days %}
+                        <section class="schedule-day" data-schedule-date="{{ day['date'] }}">
+                            <div class="schedule-day__header">
+                                <div>
+                                    <p class="section-kicker">Festival day</p>
+                                    <h3>{{ day["date"] | readable_date }}</h3>
+                                </div>
+                                <p class="schedule-day__meta">{{ day["stage_rows"]|length }} stages</p>
+                            </div>
+
+                            <div class="schedule-scroll" role="region" aria-label="Stage schedule for {{ day['date'] | readable_date }}">
+                                <div
+                                    class="schedule-table"
+                                    data-day-start-minutes="{{ day['day_start'] }}"
+                                    data-day-end-minutes="{{ day['day_end'] }}"
+                                    data-pixels-per-minute="{{ day['pixels_per_minute'] }}"
+                                    style="--timeline-width: {{ day['timeline_width'] }}px; --hour-width: {{ day['hour_width'] }}px;"
+                                >
+                                    <div class="schedule-head">
+                                        <div class="schedule-head__stage">Stage</div>
+                                        <div class="schedule-head__times">
+                                            {% for tick in day["ticks"] %}
+                                                <span
+                                                    class="schedule-tick{% if loop.first %} schedule-tick--start{% elif loop.last %} schedule-tick--end{% endif %}"
+                                                    style="left: {{ tick['left'] }}px;"
+                                                >{{ tick["label"] }}</span>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+
+                                    {% for stage in day["stage_rows"] %}
+                                        <div class="schedule-row">
+                                            <div class="schedule-row__label">
+                                                <strong>{{ stage["stage_name"] }}</strong>
+                                                <span class="schedule-row__festival">{{ stage["festival_name"] }}</span>
+                                            </div>
+                                            <div class="schedule-lane">
+                                            {% for band in stage["bands"] %}
+                                                <a
+                                                    class="schedule-band{% if band['attendee_count'] > 0 or band['favorite_count'] > 0 %} schedule-band--active{% endif %}"
+                                                    href="{{ url_for('band_detail', band_id=band['id']) }}"
+                                                    style="left: {{ band['left'] }}px; width: {{ band['width'] }}px;"
+                                                >
+                                                        <span class="schedule-band__time">
+                                                            {{ band["start_time"] | readable_time }}
+                                                            {% if band["end_time"] %}
+                                                                - {{ band["end_time"] | readable_time }}
+                                                            {% endif %}
+                                                        </span>
+                                                        <strong class="schedule-band__name">{{ band["band_name"] }}</strong>
+                                                        <span class="schedule-band__meta">{{ band["attendee_count"] }} in crowd · {{ band["favorite_count"] }} favorites</span>
+                                                    </a>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </section>
+                    {% endfor %}
+                    <p class="timeline-scroll__hint">Swipe or scroll horizontally to move through the lineup.</p>
+                {% else %}
+                    <div class="empty-state">
+                        <h3>No bands added yet</h3>
+                        <p>Switch to Manage timetable to import a CSV or create the first band slot.</p>
+                    </div>
+                {% endif %}
+            </section>
+        </section>
+    {% endif %}
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/timetable_overview.js') }}"></script>
+{% endblock %}

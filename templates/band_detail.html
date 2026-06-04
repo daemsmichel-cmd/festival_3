@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}{{ band["band_name"] }} | Festival Finder{% endblock %}
+
+{% block content %}
+    <section class="detail-band">
+        <div class="shell detail-band__inner detail-band__inner--simple">
+            <div>
+                <a class="back-link" href="{{ url_for('index') }}">Back to all bands</a>
+                <h1>{{ band["band_name"] }}</h1>
+                <p class="detail-band__meta">{{ band["favorite_count"] }} favorites · {{ band["attendee_count"] }} crowd check-ins</p>
+            </div>
+            {% if is_admin %}
+                <div class="detail-band__actions">
+                    <form method="post" action="{{ url_for('delete_band', band_id=band['id']) }}">
+                        <button class="secondary-button secondary-button--compact danger-button" type="submit">Delete band</button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="shell detail-stack">
+        <section class="section-panel">
+            <div class="section-header">
+                <div>
+                    <p class="section-kicker">Share your spot</p>
+                    <h2>Crowd check-in</h2>
+                </div>
+                <p class="section-header__meta">Optional name, position, notes, and photos.</p>
+            </div>
+
+            <form class="stack-form" method="post" action="{{ url_for('create_attendee', band_id=band['id']) }}" enctype="multipart/form-data">
+                <label class="field">
+                    <span>Name</span>
+                    <input
+                        type="text"
+                        name="display_name"
+                        placeholder="Michel"
+                        autocomplete="name"
+                        data-remember-last-value="festival-finder-display-name"
+                    >
+                </label>
+
+                <input id="latitude" type="hidden" name="latitude">
+                <input id="longitude" type="hidden" name="longitude">
+
+                <div class="inline-actions">
+                    <button class="secondary-button geo-button" type="button" data-lat-input="latitude" data-lng-input="longitude">Use my position</button>
+                    <span class="helper-text helper-text--status" data-geo-status aria-live="polite"></span>
+                </div>
+
+                <label class="field field--notes">
+                    <span>Notes</span>
+                    <textarea name="note" rows="2" placeholder="Front-left barrier, just behind the camera tower"></textarea>
+                </label>
+
+                <div class="field-grid">
+                    <label class="field">
+                        <span>POV photo</span>
+                        <input type="file" name="pov_image" accept="image/*" capture="environment">
+                    </label>
+
+                    <label class="field">
+                        <span>Side photo</span>
+                        <input type="file" name="side_image" accept="image/*" capture="environment">
+                    </label>
+                </div>
+
+                <button class="primary-button" type="submit">Check in for this band</button>
+            </form>
+        </section>
+
+        <section class="section-panel">
+            <div class="section-header">
+                <div>
+                    <p class="section-kicker">Shared views</p>
+                    <h2>Photos and positions</h2>
+                </div>
+                <p class="section-header__meta">{{ attendees|length }} crowd check-ins</p>
+            </div>
+
+            {% if attendees|length > 1 %}
+                <p class="helper-text attendee-swipe-hint">Swipe sideways on mobile to browse check-ins.</p>
+            {% endif %}
+
+            <div class="attendee-grid attendee-grid--swipe-mobile">
+                {% for attendee in attendees %}
+                    <article class="attendee-card">
+                        <div class="attendee-card__header">
+                            <div class="attendee-card__title">
+                                <h3>{{ attendee_display_name(attendee["display_name"]) }}</h3>
+                                <p class="attendee-time">
+                                    Checked in {{ attendee["created_at"] | relative_time }}
+                                </p>
+                                <div class="attendee-location">
+                                    <span class="attendee-location__label">Position</span>
+                                    {% if attendee["latitude"] is not none and attendee["longitude"] is not none %}
+                                        <p>{{ "%.6f"|format(attendee["latitude"]) }}, {{ "%.6f"|format(attendee["longitude"]) }}</p>
+                                    {% else %}
+                                        <p>Not shared</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="card-actions">
+                                {% if attendee["latitude"] is not none and attendee["longitude"] is not none %}
+                                    <a class="text-link" href="{{ openstreetmap_place_url(attendee['latitude'], attendee['longitude']) }}" target="_blank" rel="noreferrer">Open map</a>
+                                    <a
+                                        class="secondary-button secondary-button--compact native-maps-app-link"
+                                        href="{{ apple_maps_directions_url(attendee['latitude'], attendee['longitude']) }}"
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        data-ios-app-url="{{ apple_maps_ios_app_url(attendee['latitude'], attendee['longitude']) }}"
+                                    >Navigate</a>
+                                {% endif %}
+                                {% if can_manage_attendee(attendee['id']) %}
+                                    <form method="post" action="{{ url_for('delete_attendee', band_id=band['id'], attendee_id=attendee['id']) }}">
+                                        <button class="secondary-button secondary-button--compact danger-button" type="submit">Exit crowd</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        {% if attendee["note"] %}
+                            <p class="attendee-note">{{ attendee["note"] }}</p>
+                        {% endif %}
+
+                        <div class="photo-grid">
+                            <figure class="photo-frame{% if not attendee['pov_image'] %} photo-frame--empty{% endif %}">
+                                {% if attendee["pov_image"] %}
+                                    <img src="{{ url_for('uploaded_file', filename=attendee['pov_image']) }}" alt="POV view from {{ attendee_display_name(attendee['display_name']) }}">
+                                {% else %}
+                                    <div class="photo-frame__empty-copy">No POV photo uploaded.</div>
+                                {% endif %}
+                                <figcaption>POV</figcaption>
+                            </figure>
+                            <figure class="photo-frame{% if not attendee['side_image'] %} photo-frame--empty{% endif %}">
+                                {% if attendee["side_image"] %}
+                                    <img src="{{ url_for('uploaded_file', filename=attendee['side_image']) }}" alt="Side view from {{ attendee_display_name(attendee['display_name']) }}">
+                                {% else %}
+                                    <div class="photo-frame__empty-copy">No side photo uploaded.</div>
+                                {% endif %}
+                                <figcaption>Side</figcaption>
+                            </figure>
+                        </div>
+                    </article>
+                {% else %}
+                    <div class="empty-state">
+                        <h3>No one has checked in yet</h3>
+                        <p>Use the check-in form above to add the first crowd location.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="section-panel">
+            <div class="section-header">
+                <div>
+                    <p class="section-kicker">Quick save</p>
+                    <h2>Favorite this band</h2>
+                </div>
+                <p class="section-header__meta">Name only. Saved for this device.</p>
+            </div>
+
+            <form class="stack-form" method="post" action="{{ url_for('create_favorite', band_id=band['id']) }}">
+                <label class="field">
+                    <span>Name</span>
+                    <input
+                        type="text"
+                        name="display_name"
+                        placeholder="Michel"
+                        autocomplete="name"
+                        data-remember-last-value="festival-finder-display-name"
+                        required
+                    >
+                </label>
+
+                <button class="secondary-button" type="submit">Add to favorites</button>
+            </form>
+
+            {% if favorites %}
+                <div class="favorite-list">
+                    {% for favorite in favorites %}
+                        <article class="favorite-card">
+                            <div class="favorite-card__copy">
+                                <strong>{{ attendee_display_name(favorite["display_name"]) }}</strong>
+                                <p class="favorite-card__meta">Favorited {{ favorite["created_at"] | relative_time }}</p>
+                            </div>
+                            {% if can_manage_favorite(favorite['id']) %}
+                                <form method="post" action="{{ url_for('delete_favorite', band_id=band['id'], favorite_id=favorite['id']) }}">
+                                    <button class="secondary-button secondary-button--compact" type="submit">Remove favorite</button>
+                                </form>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="helper-text">No favorites yet.</p>
+            {% endif %}
+        </section>
+    </section>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/band_map.js') }}"></script>
+{% endblock %}
