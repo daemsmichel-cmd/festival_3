@@ -5,7 +5,7 @@ import io
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import (
@@ -21,11 +21,14 @@ from flask import (
     session,
     url_for,
 )
+from PIL import Image, ImageOps, UnidentifiedImageError
 from werkzeug.utils import secure_filename
 
 ALLOWED_IMAGE_EXTENSIONS = {"gif", "jpeg", "jpg", "png", "webp"}
 ALLOWED_TIMETABLE_EXTENSIONS = ALLOWED_IMAGE_EXTENSIONS | {"pdf"}
 ALLOWED_IMPORT_EXTENSIONS = {"csv", "txt"}
+ATTENDEE_PHOTO_JPEG_QUALITY = 60
+ATTENDEE_PHOTO_MAX_EDGE_PX = 1280
 DEFAULT_BAND_DURATION_MINUTES = 60
 DEFAULT_SECRET_KEY = "change-this-secret"
 INSECURE_SECRET_KEYS = {
@@ -171,10 +174,21 @@ def create_app(test_config: dict | None = None) -> Flask:
             attendee_column_map.get(column_name, (None, None, None, None, 0))[3]
             for column_name in nullable_columns
         )
+        missing_map_columns = [column_name for column_name in ("map_x", "map_y") if column_name not in attendee_column_map]
+
         if not requires_migration:
+            for column_name in missing_map_columns:
+                try:
+                    db.execute(f"ALTER TABLE attendees ADD COLUMN {column_name} REAL")
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
             return
 
         db.execute("ALTER TABLE attendees RENAME TO attendees_legacy")
+        legacy_columns = {column[1] for column in attendee_columns}
+        legacy_map_x = "map_x" if "map_x" in legacy_columns else "NULL"
+        legacy_map_y = "map_y" if "map_y" in legacy_columns else "NULL"
         db.execute(
             """
             CREATE TABLE attendees (
@@ -183,6 +197,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                 display_name TEXT,
                 latitude REAL,
                 longitude REAL,
+                map_x REAL,
+                map_y REAL,
                 note TEXT,
                 pov_image TEXT,
                 side_image TEXT,
@@ -199,6 +215,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                 display_name,
                 latitude,
                 longitude,
+                map_x,
+                map_y,
                 note,
                 pov_image,
                 side_image,
@@ -210,12 +228,14 @@ def create_app(test_config: dict | None = None) -> Flask:
                 display_name,
                 latitude,
                 longitude,
+                {legacy_map_x},
+                {legacy_map_y},
                 note,
                 pov_image,
                 side_image,
                 created_at
             FROM attendees_legacy
-            """
+            """.format(legacy_map_x=legacy_map_x, legacy_map_y=legacy_map_y)
         )
         db.execute("DROP TABLE attendees_legacy")
         db.execute("CREATE INDEX IF NOT EXISTS idx_attendees_band_id ON attendees (band_id)")
@@ -334,6 +354,60 @@ def create_app(test_config: dict | None = None) -> Flask:
         absolute_path = Path(app.config["UPLOAD_ROOT"]) / relative_path
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
         file_storage.save(absolute_path)
+        return relative_path.as_posix()
+
+    def save_attendee_photo(file_storage) -> str | None:
+        if file_storage is None or not file_storage.filename:
+            return None
+
+        original_name = secure_filename(file_storage.filename)
+        if not original_name or "." not in original_name:
+            raise ValueError("Upload must include a file extension.")
+
+        extension = original_name.rsplit(".", 1)[1].lower()
+        if extension not in ALLOWED_IMAGE_EXTENSIONS:
+            allowed = ", ".join(sorted(ALLOWED_IMAGE_EXTENSIONS))
+            raise ValueError(f"Unsupported file type. Allowed: {allowed}.")
+
+        filename_stem = Path(original_name).stem or "photo"
+        filename = f"{uuid.uuid4().hex}_{filename_stem}.jpg"
+        relative_path = Path("attendees") / filename
+        absolute_path = Path(app.config["UPLOAD_ROOT"]) / relative_path
+        absolute_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            file_storage.stream.seek(0)
+            with Image.open(file_storage.stream) as uploaded_image:
+                image = ImageOps.exif_transpose(uploaded_image)
+                image.thumbnail(
+                    (ATTENDEE_PHOTO_MAX_EDGE_PX, ATTENDEE_PHOTO_MAX_EDGE_PX),
+                    Image.Resampling.LANCZOS,
+                )
+
+                if image.mode in ("RGBA", "LA") or (
+                    image.mode == "P" and "transparency" in image.info
+                ):
+                    transparent_image = image.convert("RGBA")
+                    background = Image.new("RGB", transparent_image.size, (255, 255, 255))
+                    background.paste(transparent_image, mask=transparent_image.getchannel("A"))
+                    image = background
+                elif image.mode != "RGB":
+                    image = image.convert("RGB")
+
+                image.save(
+                    absolute_path,
+                    "JPEG",
+                    quality=ATTENDEE_PHOTO_JPEG_QUALITY,
+                    optimize=True,
+                    progressive=True,
+                )
+        except (OSError, UnidentifiedImageError) as exc:
+            try:
+                absolute_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise ValueError("Photo upload must be a valid image file.") from exc
+
         return relative_path.as_posix()
 
     def delete_uploaded_file(path: str | None) -> None:
@@ -557,11 +631,14 @@ def create_app(test_config: dict | None = None) -> Flask:
     def build_attendee_payload(attendee: sqlite3.Row) -> dict:
         has_location = attendee["latitude"] is not None and attendee["longitude"] is not None
         location = f"{attendee['latitude']},{attendee['longitude']}" if has_location else None
+        has_map_pin = attendee["map_x"] is not None and attendee["map_y"] is not None
         return {
             "id": attendee["id"],
             "display_name": attendee_display_name(attendee["display_name"]),
             "latitude": attendee["latitude"],
             "longitude": attendee["longitude"],
+            "map_x": attendee["map_x"],
+            "map_y": attendee["map_y"],
             "note": attendee["note"] or "",
             "created_at": attendee["created_at"],
             "pov_image_url": (
@@ -583,6 +660,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             else None,
             "directions_url": f"https://maps.apple.com/?daddr={location}&dirflg=w" if has_location else None,
             "ios_app_directions_url": f"maps://?daddr={location}&dirflg=w" if has_location else None,
+            "festival_map_pin": (
+                {
+                    "x": attendee["map_x"],
+                    "y": attendee["map_y"],
+                }
+                if has_map_pin
+                else None
+            ),
         }
 
     def build_schedule_days(bands: list[sqlite3.Row]) -> list[dict]:
@@ -817,6 +902,28 @@ def create_app(test_config: dict | None = None) -> Flask:
         suffix = "" if current_value == 1 else "s"
         return f"{current_value} month{suffix} ago"
 
+    @app.template_filter("compact_relative_time")
+    def compact_relative_time(value: str | None) -> str:
+        timestamp = parse_timestamp(value)
+        if timestamp is None:
+            return "now"
+
+        elapsed_seconds = max(
+            int((datetime.now(timezone.utc) - timestamp).total_seconds()),
+            0,
+        )
+        if elapsed_seconds < 60:
+            return "now"
+        if elapsed_seconds < 60 * 60:
+            return f"{elapsed_seconds // 60}m"
+        if elapsed_seconds < 24 * 60 * 60:
+            return f"{elapsed_seconds // (60 * 60)}h"
+        if elapsed_seconds < 7 * 24 * 60 * 60:
+            return f"{elapsed_seconds // (24 * 60 * 60)}d"
+        if elapsed_seconds < 4 * 7 * 24 * 60 * 60:
+            return f"{elapsed_seconds // (7 * 24 * 60 * 60)}w"
+        return f"{elapsed_seconds // (30 * 24 * 60 * 60)}mo"
+
     @app.errorhandler(413)
     def file_too_large(_error):
         flash("Upload too large. Keep files under 24 MB.", "error")
@@ -862,6 +969,91 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/admin")
     def admin_page():
         return render_home("manage")
+
+    @app.get("/check-ins")
+    def check_ins_page():
+        threshold = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        check_ins = get_db().execute(
+            """
+            SELECT
+                a.id AS attendee_id,
+                a.display_name,
+                a.latitude,
+                a.longitude,
+                a.map_x,
+                a.map_y,
+                a.pov_image,
+                a.side_image,
+                a.created_at,
+                b.id AS band_id,
+                b.band_name,
+                b.festival_name,
+                b.stage_name,
+                b.performance_date,
+                b.start_time,
+                b.end_time
+            FROM attendees a
+            JOIN bands b ON b.id = a.band_id
+            WHERE a.created_at >= ?
+            ORDER BY a.created_at DESC, a.id DESC
+            """,
+            (threshold,),
+        ).fetchall()
+
+        return render_template("check_ins.html", check_ins=check_ins)
+
+    @app.get("/favorites")
+    def favorites_page():
+        favorite_rows = get_db().execute(
+            """
+            SELECT
+                f.id AS favorite_id,
+                f.display_name,
+                f.created_at AS favorited_at,
+                b.id AS band_id,
+                b.band_name,
+                b.festival_name,
+                b.stage_name,
+                b.performance_date,
+                b.start_time,
+                b.end_time,
+                COUNT(DISTINCT a.id) AS attendee_count
+            FROM favorites f
+            JOIN bands b ON b.id = f.band_id
+            LEFT JOIN attendees a ON a.band_id = b.id
+            GROUP BY f.id
+            ORDER BY b.performance_date ASC, b.start_time ASC, b.band_name ASC, f.created_at ASC, f.id ASC
+            """
+        ).fetchall()
+
+        favorite_bands_by_id = {}
+        for row in favorite_rows:
+            entry = favorite_bands_by_id.setdefault(
+                row["band_id"],
+                {
+                    "id": row["band_id"],
+                    "band_name": row["band_name"],
+                    "festival_name": row["festival_name"],
+                    "stage_name": row["stage_name"] or "Stage TBA",
+                    "performance_date": row["performance_date"],
+                    "start_time": row["start_time"],
+                    "end_time": row["end_time"],
+                    "attendee_count": row["attendee_count"],
+                    "favorites": [],
+                },
+            )
+            entry["favorites"].append(
+                {
+                    "id": row["favorite_id"],
+                    "display_name": attendee_display_name(row["display_name"]),
+                    "created_at": row["favorited_at"],
+                }
+            )
+
+        return render_template(
+            "favorites.html",
+            favorite_bands=list(favorite_bands_by_id.values()),
+        )
 
     @app.post("/bands")
     def create_band():
@@ -1140,6 +1332,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         note = request.form.get("note", "").strip() or None
         latitude_raw = request.form.get("latitude", "").strip()
         longitude_raw = request.form.get("longitude", "").strip()
+        map_x_raw = request.form.get("map_x", "").strip()
+        map_y_raw = request.form.get("map_y", "").strip()
 
         latitude = None
         longitude = None
@@ -1151,14 +1345,28 @@ def create_app(test_config: dict | None = None) -> Flask:
                 flash(str(exc), "error")
                 return redirect(url_for("band_detail", band_id=band["id"]))
 
+        map_x = None
+        map_y = None
+        if map_x_raw or map_y_raw:
+            if not map_x_raw or not map_y_raw:
+                flash("Map pin must include both horizontal and vertical position.", "error")
+                return redirect(url_for("band_detail", band_id=band["id"]))
+
+            try:
+                map_x = parse_coordinate(map_x_raw, 0.0, 100.0, "Map pin horizontal position")
+                map_y = parse_coordinate(map_y_raw, 0.0, 100.0, "Map pin vertical position")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("band_detail", band_id=band["id"]))
+
         pov_image = request.files.get("pov_image")
         side_image = request.files.get("side_image")
 
         pov_path = None
         side_path = None
         try:
-            pov_path = save_upload(pov_image, "attendees", ALLOWED_IMAGE_EXTENSIONS)
-            side_path = save_upload(side_image, "attendees", ALLOWED_IMAGE_EXTENSIONS)
+            pov_path = save_attendee_photo(pov_image)
+            side_path = save_attendee_photo(side_image)
         except ValueError as exc:
             delete_uploaded_file(pov_path)
             delete_uploaded_file(side_path)
@@ -1173,16 +1381,20 @@ def create_app(test_config: dict | None = None) -> Flask:
                 display_name,
                 latitude,
                 longitude,
+                map_x,
+                map_y,
                 note,
                 pov_image,
                 side_image
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 band["id"],
                 display_name,
                 latitude,
                 longitude,
+                map_x,
+                map_y,
                 note,
                 pov_path,
                 side_path,
@@ -1271,4 +1483,10 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5001"))
     debug_mode = os.environ.get("FLASK_DEBUG") == "1"
     ssl_context = resolve_local_ssl_context(app.root_path)
-    app.run(host="0.0.0.0", port=port, debug=debug_mode, ssl_context=ssl_context)
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=debug_mode,
+        ssl_context=ssl_context,
+        threaded=True,
+    )

@@ -27,10 +27,18 @@
                     <p class="section-kicker">Share your spot</p>
                     <h2>Crowd check-in</h2>
                 </div>
-                <p class="section-header__meta">Optional name, position, notes, and photos.</p>
+                <p class="section-header__meta">Optional name, position, and photos.</p>
             </div>
 
-            <form class="stack-form" method="post" action="{{ url_for('create_attendee', band_id=band['id']) }}" enctype="multipart/form-data">
+            <form
+                class="stack-form"
+                method="post"
+                action="{{ url_for('create_attendee', band_id=band['id']) }}"
+                enctype="multipart/form-data"
+                data-photo-compression-form
+                data-photo-max-edge="1280"
+                data-photo-quality="0.6"
+            >
                 <label class="field">
                     <span>Name</span>
                     <input
@@ -44,29 +52,50 @@
 
                 <input id="latitude" type="hidden" name="latitude">
                 <input id="longitude" type="hidden" name="longitude">
+                <input id="map-x" type="hidden" name="map_x">
+                <input id="map-y" type="hidden" name="map_y">
 
                 <div class="inline-actions">
                     <button class="secondary-button geo-button" type="button" data-lat-input="latitude" data-lng-input="longitude">Use my position</button>
                     <span class="helper-text helper-text--status" data-geo-status aria-live="polite"></span>
                 </div>
 
-                <label class="field field--notes">
-                    <span>Notes</span>
-                    <textarea name="note" rows="2" placeholder="Front-left barrier, just behind the camera tower"></textarea>
-                </label>
+                <div
+                    class="festival-map festival-map--picker"
+                    data-festival-map
+                    data-map-x-input="map-x"
+                    data-map-y-input="map-y"
+                >
+                    <div class="field festival-map__field">
+                        <span>GMM 2026 map pin</span>
+                        <div class="festival-map__toolbar" aria-label="Map zoom controls">
+                            <button class="secondary-button secondary-button--compact festival-map__zoom-button" type="button" data-map-zoom-out aria-label="Zoom out">-</button>
+                            <button class="secondary-button secondary-button--compact festival-map__zoom-button" type="button" data-map-zoom-in aria-label="Zoom in">+</button>
+                            <button class="secondary-button secondary-button--compact" type="button" data-map-pin-clear>Clear pin</button>
+                        </div>
+                    </div>
+                    <div class="festival-map__viewport" data-map-viewport>
+                        <div class="festival-map__canvas" data-map-canvas style="--map-zoom: 1.2;">
+                            <img src="{{ url_for('static', filename='img/gmm2026.png') }}" alt="GMM 2026 festival map">
+                            <span class="festival-map__pin festival-map__pin--draft" data-map-draft-pin hidden aria-label="Selected map pin"></span>
+                        </div>
+                    </div>
+                    <span class="helper-text helper-text--status festival-map__status" data-map-status aria-live="polite">No map pin selected.</span>
+                </div>
 
                 <div class="field-grid">
                     <label class="field">
                         <span>POV photo</span>
-                        <input type="file" name="pov_image" accept="image/*" capture="environment">
+                        <input type="file" name="pov_image" accept="image/*" capture="environment" data-compress-photo>
                     </label>
 
                     <label class="field">
                         <span>Side photo</span>
-                        <input type="file" name="side_image" accept="image/*" capture="environment">
+                        <input type="file" name="side_image" accept="image/*" capture="environment" data-compress-photo>
                     </label>
                 </div>
 
+                <span class="helper-text helper-text--status" data-photo-compression-status aria-live="polite"></span>
                 <button class="primary-button" type="submit">Check in for this band</button>
             </form>
         </section>
@@ -74,8 +103,7 @@
         <section class="section-panel">
             <div class="section-header">
                 <div>
-                    <p class="section-kicker">Shared views</p>
-                    <h2>Photos and positions</h2>
+                    <h2>Friend position</h2>
                 </div>
                 <p class="section-header__meta">{{ attendees|length }} crowd check-ins</p>
             </div>
@@ -83,6 +111,33 @@
             {% if attendees|length > 1 %}
                 <p class="helper-text attendee-swipe-hint">Swipe sideways on mobile to browse check-ins.</p>
             {% endif %}
+
+            <div class="festival-map festival-map--shared" data-festival-map>
+                <div class="festival-map__toolbar" aria-label="Map zoom controls">
+                    <button class="secondary-button secondary-button--compact festival-map__zoom-button" type="button" data-map-zoom-out aria-label="Zoom out">-</button>
+                    <button class="secondary-button secondary-button--compact festival-map__zoom-button" type="button" data-map-zoom-in aria-label="Zoom in">+</button>
+                </div>
+                <div class="festival-map__viewport" data-map-viewport>
+                    <div class="festival-map__canvas" data-map-canvas style="--map-zoom: 1;">
+                        <img src="{{ url_for('static', filename='img/gmm2026.png') }}" alt="GMM 2026 festival map with check-in pins">
+                        {% for attendee in attendees %}
+                            {% if attendee["map_x"] is not none and attendee["map_y"] is not none %}
+                                <button
+                                    class="festival-map__pin festival-map__pin--shared"
+                                    type="button"
+                                    data-map-shared-pin
+                                    style="--pin-x: {{ attendee['map_x'] }}%; --pin-y: {{ attendee['map_y'] }}%;"
+                                    title="{{ attendee_display_name(attendee['display_name']) }} · {{ attendee['created_at'] | compact_relative_time }}"
+                                    aria-label="Map pin for {{ attendee_display_name(attendee['display_name']) }}, checked in {{ attendee['created_at'] | relative_time }}"
+                                    aria-expanded="false"
+                                >
+                                    <span class="festival-map__pin-label">{{ attendee_display_name(attendee["display_name"]) }} · {{ attendee["created_at"] | compact_relative_time }}</span>
+                                </button>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
 
             <div class="attendee-grid attendee-grid--swipe-mobile">
                 {% for attendee in attendees %}
@@ -97,6 +152,8 @@
                                     <span class="attendee-location__label">Position</span>
                                     {% if attendee["latitude"] is not none and attendee["longitude"] is not none %}
                                         <p>{{ "%.6f"|format(attendee["latitude"]) }}, {{ "%.6f"|format(attendee["longitude"]) }}</p>
+                                    {% elif attendee["map_x"] is not none and attendee["map_y"] is not none %}
+                                        <p>Shared on GMM map</p>
                                     {% else %}
                                         <p>Not shared</p>
                                     {% endif %}
@@ -120,10 +177,6 @@
                                 {% endif %}
                             </div>
                         </div>
-
-                        {% if attendee["note"] %}
-                            <p class="attendee-note">{{ attendee["note"] }}</p>
-                        {% endif %}
 
                         <div class="photo-grid">
                             <figure class="photo-frame{% if not attendee['pov_image'] %} photo-frame--empty{% endif %}">

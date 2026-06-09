@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Check Ins | Festival Finder{% endblock %}
+
+{% block content %}
+    <section class="shell detail-stack detail-stack--top">
+        <section class="section-panel">
+            <div class="section-header">
+                <div>
+                    <p class="section-kicker">Last 2 hours</p>
+                    <h2>Check Ins</h2>
+                </div>
+                <p class="section-header__meta">{{ check_ins|length }} recent check-ins</p>
+            </div>
+
+            {% if check_ins %}
+                <div class="check-in-map-block">
+                    <div class="section-header section-header--compact">
+                        <div>
+                            <h3>Friend position</h3>
+                        </div>
+                        <p class="section-header__meta">Recent GMM map pins</p>
+                    </div>
+
+                    <div class="festival-map festival-map--shared" data-festival-map>
+                        <div class="festival-map__toolbar" aria-label="Map zoom controls">
+                            <button class="secondary-button secondary-button--compact festival-map__zoom-button" type="button" data-map-zoom-out aria-label="Zoom out">-</button>
+                            <button class="secondary-button secondary-button--compact festival-map__zoom-button" type="button" data-map-zoom-in aria-label="Zoom in">+</button>
+                        </div>
+                        <div class="festival-map__viewport" data-map-viewport>
+                            <div class="festival-map__canvas" data-map-canvas style="--map-zoom: 1;">
+                                <img src="{{ url_for('static', filename='img/gmm2026.png') }}" alt="GMM 2026 festival map with recent check-in pins">
+                                {% for check_in in check_ins %}
+                                    {% if check_in["map_x"] is not none and check_in["map_y"] is not none %}
+                                        <button
+                                            class="festival-map__pin festival-map__pin--shared"
+                                            type="button"
+                                            data-map-shared-pin
+                                            style="--pin-x: {{ check_in['map_x'] }}%; --pin-y: {{ check_in['map_y'] }}%;"
+                                            title="{{ attendee_display_name(check_in['display_name']) }} at {{ check_in['band_name'] }} · {{ check_in['created_at'] | compact_relative_time }}"
+                                            aria-label="Map pin for {{ attendee_display_name(check_in['display_name']) }} at {{ check_in['band_name'] }}, checked in {{ check_in['created_at'] | relative_time }}"
+                                            aria-expanded="false"
+                                        >
+                                            <span class="festival-map__pin-label">{{ attendee_display_name(check_in["display_name"]) }} · {{ check_in["created_at"] | compact_relative_time }}</span>
+                                        </button>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="check-in-list">
+                    {% for check_in in check_ins %}
+                        <article class="check-in-card">
+                            <div class="check-in-card__main">
+                                <div class="check-in-card__copy">
+                                    <p class="section-kicker">Checked in {{ check_in["created_at"] | relative_time }}</p>
+                                    <h3>{{ attendee_display_name(check_in["display_name"]) }}</h3>
+                                    <a class="check-in-card__band" href="{{ url_for('band_detail', band_id=check_in['band_id']) }}">{{ check_in["band_name"] }}</a>
+                                    <p class="favorite-card__meta">
+                                        {{ check_in["performance_date"] | readable_date }} · {{ check_in["start_time"] | readable_time }}
+                                        {% if check_in["end_time"] %}
+                                            - {{ check_in["end_time"] | readable_time }}
+                                        {% endif %}
+                                        · {{ check_in["stage_name"] or "Stage TBA" }}
+                                    </p>
+                                    <p class="favorite-card__meta">{{ check_in["festival_name"] }}</p>
+                                </div>
+                                <a class="secondary-button secondary-button--compact" href="{{ url_for('band_detail', band_id=check_in['band_id']) }}">View band</a>
+                            </div>
+
+                            <div class="check-in-card__status">
+                                {% if check_in["latitude"] is not none and check_in["longitude"] is not none %}
+                                    <span class="attendee-location__label">GPS</span>
+                                    <span>{{ "%.6f"|format(check_in["latitude"]) }}, {{ "%.6f"|format(check_in["longitude"]) }}</span>
+                                {% elif check_in["map_x"] is not none and check_in["map_y"] is not none %}
+                                    <span class="attendee-location__label">Map</span>
+                                    <span>Shared on GMM map</span>
+                                {% else %}
+                                    <span class="attendee-location__label">Position</span>
+                                    <span>Not shared</span>
+                                {% endif %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <h3>No check-ins in the last 2 hours</h3>
+                    <p>New crowd check-ins will show up here.</p>
+                </div>
+            {% endif %}
+        </section>
+    </section>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/band_map.js') }}"></script>
+{% endblock %}

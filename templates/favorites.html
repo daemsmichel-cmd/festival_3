@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Favorites | Festival Finder{% endblock %}
+
+{% block content %}
+    <section class="shell detail-stack detail-stack--top">
+        <section class="section-panel">
+            <div class="section-header">
+                <div>
+                    <p class="section-kicker">Quick save</p>
+                    <h2>Favorites</h2>
+                </div>
+                <p class="section-header__meta">{{ favorite_bands|length }} bands</p>
+            </div>
+
+            {% if favorite_bands %}
+                <div class="favorite-band-list">
+                    {% for band in favorite_bands %}
+                        <article class="favorite-band-card">
+                            <div class="favorite-band-card__main">
+                                <div>
+                                    <a class="favorite-band-card__title" href="{{ url_for('band_detail', band_id=band['id']) }}">{{ band["band_name"] }}</a>
+                                    <p class="favorite-card__meta">
+                                        {{ band["performance_date"] | readable_date }} · {{ band["start_time"] | readable_time }}
+                                        {% if band["end_time"] %}
+                                            - {{ band["end_time"] | readable_time }}
+                                        {% endif %}
+                                        · {{ band["stage_name"] }}
+                                    </p>
+                                    <p class="favorite-card__meta">{{ band["festival_name"] }} · {{ band["attendee_count"] }} crowd check-ins</p>
+                                </div>
+                                <a class="secondary-button secondary-button--compact" href="{{ url_for('band_detail', band_id=band['id']) }}">View band</a>
+                            </div>
+
+                            <div class="favorite-band-card__people">
+                                <span class="attendee-location__label">Favourited by</span>
+                                <div class="favorite-chip-list">
+                                    {% for favorite in band["favorites"] %}
+                                        <span class="favorite-chip" title="Favorited {{ favorite['created_at'] | relative_time }}">{{ favorite["display_name"] }}</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <h3>No favorites yet</h3>
+                    <p>Add a band to favorites from its band page.</p>
+                </div>
+            {% endif %}
+        </section>
+    </section>
+{% endblock %}

@@ -7,7 +7,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+
 from app import create_app, resolve_local_ssl_context
+
+
+def make_image_upload(size=(1800, 1200), color=(80, 120, 160), image_format="JPEG"):
+    image_file = io.BytesIO()
+    Image.new("RGB", size, color).save(image_file, format=image_format)
+    image_file.seek(0)
+    return image_file
 
 
 class FestivalFinderTestCase(unittest.TestCase):
@@ -40,9 +49,12 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertIn(b"This device:", response.data)
         self.assertIn(b"/static/js/device_profile.js", response.data)
         self.assertIn(b"/static/js/timetable_overview.js", response.data)
-        self.assertIn(b"Admin", response.data)
+        self.assertIn(b"Check Ins", response.data)
+        self.assertIn(b"Favorites", response.data)
+        self.assertIn(b"Admin login", response.data)
+        self.assertIn(b'href="/check-ins"', response.data)
         self.assertIn(b'href="/admin"', response.data)
-        self.assertNotIn(b"Admin login", response.data)
+        self.assertIn(b'href="/favorites"', response.data)
         self.assertNotIn(b"Log out", response.data)
         self.assertNotIn(b"bands tracked", response.data)
         self.assertNotIn(b"friend check-ins", response.data)
@@ -155,6 +167,8 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(attendee_columns["display_name"], 0)
         self.assertEqual(attendee_columns["latitude"], 0)
         self.assertEqual(attendee_columns["longitude"], 0)
+        self.assertEqual(attendee_columns["map_x"], 0)
+        self.assertEqual(attendee_columns["map_y"], 0)
         self.assertEqual(attendee_columns["pov_image"], 0)
         self.assertEqual(attendee_columns["side_image"], 0)
 
@@ -177,7 +191,6 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertIn(b"Excel CSV import", response.data)
         self.assertIn(b"Upload single band", response.data)
         self.assertIn(b"Manage timetable", response.data)
-        self.assertNotIn(b"Admin login", response.data)
         self.assertNotIn(b"Log out", response.data)
 
         query_response = self.client.get("/?tab=manage")
@@ -331,13 +344,20 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"The Twilight Set", response.data)
         self.assertIn(b"Favorite this band", response.data)
-        self.assertIn(b"Photos and positions", response.data)
+        self.assertIn(b"Friend position", response.data)
+        self.assertNotIn(b"Photos and positions", response.data)
+        self.assertIn(b"GMM 2026 map pin", response.data)
+        self.assertIn(b"/static/img/gmm2026.png", response.data)
+        self.assertIn(b"No map pin selected.", response.data)
+        self.assertNotIn(b'data-map-zoom type="range"', response.data)
         self.assertNotIn(b"Friend map", response.data)
         self.assertIn(b"Delete band", response.data)
         self.assertNotIn(b"Latitude", response.data)
         self.assertNotIn(b"Longitude", response.data)
         self.assertNotIn(b"Add your crowd view", response.data)
         self.assertNotIn(b"Share a name, GPS location, POV photo, and side photo.", response.data)
+        self.assertNotIn(b'name="note"', response.data)
+        self.assertNotIn(b"Notes", response.data)
         self.assertNotIn(b"Tap once to add your position before checking in.", response.data)
         self.assertNotIn(b"iPhone only allows browser location on HTTPS sites.", response.data)
         self.assertIn(b'autocomplete="name"', response.data)
@@ -357,9 +377,11 @@ class FestivalFinderTestCase(unittest.TestCase):
                 "display_name": "Michel",
                 "latitude": "51.234567",
                 "longitude": "4.123456",
+                "map_x": "42.500",
+                "map_y": "61.250",
                 "note": "Front-left barrier, close to the camera rail.",
-                "pov_image": (io.BytesIO(b"pov image"), "pov.jpg"),
-                "side_image": (io.BytesIO(b"side image"), "side.jpg"),
+                "pov_image": (make_image_upload(size=(1800, 900), image_format="PNG"), "pov.png"),
+                "side_image": (make_image_upload(size=(900, 1800)), "side.jpg"),
             },
             content_type="multipart/form-data",
             follow_redirects=True,
@@ -368,7 +390,13 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Michel", response.data)
         self.assertIn(b"Checked in just now", response.data)
-        self.assertTrue(any(self.upload_root.joinpath("attendees").iterdir()))
+        attendee_files = sorted(self.upload_root.joinpath("attendees").iterdir())
+        self.assertEqual(len(attendee_files), 2)
+        self.assertTrue(all(path.suffix == ".jpg" for path in attendee_files))
+        for attendee_file in attendee_files:
+            with Image.open(attendee_file) as image:
+                self.assertEqual(image.format, "JPEG")
+                self.assertLessEqual(max(image.size), 1280)
 
         overview_response = self.client.get("/")
         self.assertEqual(overview_response.status_code, 200)
@@ -379,6 +407,9 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(api_response.status_code, 200)
         payload = api_response.get_json()
         self.assertEqual(payload["attendees"][0]["display_name"], "Michel")
+        self.assertEqual(payload["attendees"][0]["map_x"], 42.5)
+        self.assertEqual(payload["attendees"][0]["map_y"], 61.25)
+        self.assertEqual(payload["attendees"][0]["festival_map_pin"], {"x": 42.5, "y": 61.25})
         self.assertIn("https://www.openstreetmap.org/", payload["attendees"][0]["map_url"])
         self.assertIn("https://maps.apple.com/?daddr=", payload["attendees"][0]["directions_url"])
         self.assertIn("maps://?daddr=", payload["attendees"][0]["ios_app_directions_url"])
@@ -387,6 +418,10 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(band_detail_response.status_code, 200)
         self.assertIn(b"Open map", band_detail_response.data)
         self.assertIn(b"Exit crowd", band_detail_response.data)
+        self.assertIn(b"--pin-x: 42.5%; --pin-y: 61.25%;", band_detail_response.data)
+        self.assertIn(b"data-map-shared-pin", band_detail_response.data)
+        self.assertIn(b"festival-map__pin-label", band_detail_response.data)
+        self.assertIn("Michel · now".encode(), band_detail_response.data)
 
         other_client = self.app.test_client()
         other_band_detail_response = other_client.get("/bands/1")
@@ -429,6 +464,14 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertIn(b"1 favorites", favorite_response.data)
         self.assertIn(b"Remove favorite", favorite_response.data)
 
+        favorites_page_response = self.client.get("/favorites")
+        self.assertEqual(favorites_page_response.status_code, 200)
+        self.assertIn(b"Signal Fires", favorites_page_response.data)
+        self.assertIn(b"Favourited by", favorites_page_response.data)
+        self.assertIn(b"Michel", favorites_page_response.data)
+        self.assertIn(b"View band", favorites_page_response.data)
+        self.assertIn(b'href="/bands/1"', favorites_page_response.data)
+
         duplicate_response = self.client.post(
             "/bands/1/favorites",
             data={"display_name": "Michel"},
@@ -454,6 +497,10 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(delete_response.status_code, 200)
         self.assertIn(b"Michel removed Signal Fires from favorites.", delete_response.data)
         self.assertIn(b"No favorites yet.", delete_response.data)
+
+        empty_favorites_page_response = self.client.get("/favorites")
+        self.assertEqual(empty_favorites_page_response.status_code, 200)
+        self.assertIn(b"No favorites yet", empty_favorites_page_response.data)
 
         cleared_overview_response = self.client.get("/")
         self.assertEqual(cleared_overview_response.status_code, 200)
@@ -489,11 +536,119 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(payload["attendees"][0]["display_name"], "Anonymous")
         self.assertIsNone(payload["attendees"][0]["latitude"])
         self.assertIsNone(payload["attendees"][0]["longitude"])
+        self.assertIsNone(payload["attendees"][0]["map_x"])
+        self.assertIsNone(payload["attendees"][0]["map_y"])
+        self.assertIsNone(payload["attendees"][0]["festival_map_pin"])
         self.assertIsNone(payload["attendees"][0]["map_url"])
         self.assertIsNone(payload["attendees"][0]["directions_url"])
         self.assertIsNone(payload["attendees"][0]["ios_app_directions_url"])
         self.assertIsNone(payload["attendees"][0]["pov_image_url"])
         self.assertIsNone(payload["attendees"][0]["side_image_url"])
+
+    def test_check_ins_page_shows_only_last_two_hours(self):
+        first_band_response = self.client.post(
+            "/bands",
+            data={
+                "band_name": "Fresh Signal",
+                "festival_name": "North Field",
+                "stage_name": "Main Stage",
+                "performance_date": "2026-08-20",
+                "start_time": "19:00",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(first_band_response.status_code, 302)
+
+        second_band_response = self.client.post(
+            "/bands",
+            data={
+                "band_name": "Old Signal",
+                "festival_name": "North Field",
+                "stage_name": "Tent Stage",
+                "performance_date": "2026-08-20",
+                "start_time": "20:00",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(second_band_response.status_code, 302)
+
+        third_band_response = self.client.post(
+            "/bands",
+            data={
+                "band_name": "Ancient Signal",
+                "festival_name": "North Field",
+                "stage_name": "Tent Stage",
+                "performance_date": "2026-08-20",
+                "start_time": "21:00",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(third_band_response.status_code, 302)
+
+        fresh_check_in_response = self.client.post(
+            "/bands/1/attendees",
+            data={
+                "display_name": "Mila",
+                "map_x": "45.0",
+                "map_y": "55.0",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(fresh_check_in_response.status_code, 302)
+
+        old_check_in_response = self.client.post(
+            "/bands/2/attendees",
+            data={
+                "display_name": "Nina",
+                "latitude": "50.850300",
+                "longitude": "4.351700",
+                "map_x": "35.0",
+                "map_y": "65.0",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(old_check_in_response.status_code, 302)
+
+        ancient_check_in_response = self.client.post(
+            "/bands/3/attendees",
+            data={
+                "display_name": "Noor",
+                "map_x": "20.0",
+                "map_y": "30.0",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(ancient_check_in_response.status_code, 302)
+
+        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=7)).strftime("%Y-%m-%d %H:%M:%S")
+        older_time = (datetime.now(timezone.utc) - timedelta(hours=1, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        ancient_time = (datetime.now(timezone.utc) - timedelta(hours=2, minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+        db = sqlite3.connect(self.app.config["DATABASE"])
+        db.execute("UPDATE attendees SET created_at = ? WHERE display_name = ?", (recent_time, "Mila"))
+        db.execute("UPDATE attendees SET created_at = ? WHERE display_name = ?", (older_time, "Nina"))
+        db.execute("UPDATE attendees SET created_at = ? WHERE display_name = ?", (ancient_time, "Noor"))
+        db.commit()
+        db.close()
+
+        self.client.get("/")
+        response = self.client.get("/check-ins")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Check Ins", response.data)
+        self.assertIn(b"Last 2 hours", response.data)
+        self.assertIn(b"Friend position", response.data)
+        self.assertIn(b"GMM 2026 festival map with recent check-in pins", response.data)
+        self.assertIn(b"data-map-shared-pin", response.data)
+        self.assertIn(b"--pin-x: 45.0%; --pin-y: 55.0%;", response.data)
+        self.assertIn(b"--pin-x: 35.0%; --pin-y: 65.0%;", response.data)
+        self.assertIn("Mila · 7m".encode(), response.data)
+        self.assertIn("Nina · 1h".encode(), response.data)
+        self.assertIn(b"Fresh Signal", response.data)
+        self.assertIn(b"Mila", response.data)
+        self.assertIn(b"Shared on GMM map", response.data)
+        self.assertIn(b"Old Signal", response.data)
+        self.assertIn(b"Nina", response.data)
+        self.assertNotIn(b"Ancient Signal", response.data)
+        self.assertNotIn(b"Noor", response.data)
 
     def test_relative_time_label_for_older_checkins(self):
         create_response = self.client.post(
@@ -514,8 +669,8 @@ class FestivalFinderTestCase(unittest.TestCase):
                 "display_name": "Ari",
                 "latitude": "50.850300",
                 "longitude": "4.351700",
-                "pov_image": (io.BytesIO(b"pov image"), "pov.jpg"),
-                "side_image": (io.BytesIO(b"side image"), "side.jpg"),
+                "pov_image": (make_image_upload(), "pov.jpg"),
+                "side_image": (make_image_upload(color=(140, 80, 120)), "side.jpg"),
             },
             content_type="multipart/form-data",
             follow_redirects=False,
@@ -583,8 +738,8 @@ class FestivalFinderTestCase(unittest.TestCase):
                 "display_name": "Mila",
                 "latitude": "50.850300",
                 "longitude": "4.351700",
-                "pov_image": (io.BytesIO(b"pov image"), "pov.jpg"),
-                "side_image": (io.BytesIO(b"side image"), "side.jpg"),
+                "pov_image": (make_image_upload(), "pov.jpg"),
+                "side_image": (make_image_upload(color=(140, 80, 120)), "side.jpg"),
             },
             content_type="multipart/form-data",
             follow_redirects=False,
@@ -633,8 +788,8 @@ class FestivalFinderTestCase(unittest.TestCase):
                 "display_name": "Nina",
                 "latitude": "50.850300",
                 "longitude": "4.351700",
-                "pov_image": (io.BytesIO(b"pov image"), "pov.jpg"),
-                "side_image": (io.BytesIO(b"side image"), "side.jpg"),
+                "pov_image": (make_image_upload(), "pov.jpg"),
+                "side_image": (make_image_upload(color=(140, 80, 120)), "side.jpg"),
             },
             content_type="multipart/form-data",
             follow_redirects=False,

@@ -649,10 +649,6 @@ textarea {
     resize: vertical;
 }
 
-.field--notes textarea {
-    min-height: 76px;
-}
-
 .helper-text--status:empty {
     display: none;
 }
@@ -673,6 +669,141 @@ textarea {
 
 .helper-text--status[data-state="error"] {
     color: var(--rust);
+}
+
+.festival-map {
+    display: grid;
+    gap: 10px;
+}
+
+.festival-map--shared {
+    margin-bottom: 16px;
+}
+
+.festival-map__field {
+    gap: 10px;
+}
+
+.festival-map__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.festival-map__zoom-button {
+    width: 38px;
+    padding: 0;
+}
+
+.festival-map__viewport {
+    max-height: min(62vh, 520px);
+    min-height: 270px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: #080d12;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(121, 208, 174, 0.4) transparent;
+    overscroll-behavior: contain;
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+}
+
+.festival-map__canvas {
+    position: relative;
+    width: max(100%, calc(960px * var(--map-zoom, 1)));
+    line-height: 0;
+    cursor: crosshair;
+}
+
+.festival-map--shared .festival-map__canvas {
+    cursor: grab;
+}
+
+.festival-map__canvas img {
+    width: 100%;
+    max-width: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.festival-map__pin {
+    position: absolute;
+    left: var(--pin-x, 50%);
+    top: var(--pin-y, 50%);
+    z-index: 2;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 3px solid #ffffff;
+    border-radius: 999px;
+    background: var(--rust);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+    transform: translate(-50%, -100%);
+    color: var(--text);
+    font: inherit;
+}
+
+.festival-map__pin::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -8px;
+    width: 8px;
+    height: 8px;
+    border-right: 3px solid #ffffff;
+    border-bottom: 3px solid #ffffff;
+    border-radius: 0 0 2px 0;
+    background: inherit;
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.festival-map__pin--draft {
+    background: var(--green);
+    pointer-events: none;
+}
+
+.festival-map__pin--shared {
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.festival-map__pin--shared:focus-visible {
+    outline: 3px solid rgba(121, 208, 174, 0.7);
+    outline-offset: 5px;
+}
+
+.festival-map__pin-label {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
+    display: none;
+    max-width: 160px;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 6px;
+    background: rgba(8, 13, 18, 0.92);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.38);
+    color: var(--text);
+    font-size: 0.76rem;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.festival-map__pin--active {
+    z-index: 3;
+}
+
+.festival-map__pin--active .festival-map__pin-label {
+    display: block;
+}
+
+.festival-map__status {
+    min-height: 22px;
 }
 
 .primary-button,
@@ -752,16 +883,66 @@ textarea {
     gap: 12px;
 }
 
-.attendee-note {
+.check-in-list {
+    display: grid;
+    gap: 12px;
+}
+
+.check-in-map-block {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.check-in-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-strong);
+}
+
+.check-in-card__main {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: start;
+}
+
+.check-in-card__copy {
+    display: grid;
+    gap: 4px;
+}
+
+.check-in-card__copy h3 {
     margin: 0;
-    color: var(--text);
-    font-size: 0.94rem;
+    font-size: 1rem;
+}
+
+.check-in-card__band {
+    color: var(--green);
+    font-weight: 800;
+}
+
+.check-in-card__status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 0.88rem;
 }
 
 .favorite-list {
     display: grid;
     gap: 12px;
     margin-top: 16px;
+}
+
+.favorite-band-list {
+    display: grid;
+    gap: 12px;
 }
 
 .favorite-card {
@@ -773,6 +954,56 @@ textarea {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface-strong);
+}
+
+.favorite-band-card {
+    display: grid;
+    gap: 14px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-strong);
+}
+
+.favorite-band-card__main,
+.favorite-band-card__people {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: start;
+}
+
+.favorite-band-card__title {
+    display: inline-block;
+    margin-bottom: 5px;
+    color: var(--green);
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.favorite-band-card__people {
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+}
+
+.favorite-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.favorite-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid rgba(121, 208, 174, 0.28);
+    border-radius: 999px;
+    background: var(--green-soft);
+    color: var(--text);
+    font-size: 0.84rem;
+    font-weight: 700;
 }
 
 .favorite-card__copy {
@@ -948,6 +1179,9 @@ textarea {
     .band-card__footer,
     .stage-card,
     .inline-actions,
+    .check-in-card__main,
+    .favorite-band-card__main,
+    .favorite-band-card__people,
     .section-header {
         flex-direction: column;
     }
@@ -966,5 +1200,14 @@ textarea {
     .attendee-grid--swipe-mobile .attendee-card,
     .attendee-grid--swipe-mobile .empty-state {
         scroll-snap-align: start;
+    }
+
+    .festival-map__viewport {
+        max-height: 54vh;
+        min-height: 250px;
+    }
+
+    .festival-map__canvas {
+        width: max(100%, calc(780px * var(--map-zoom, 1)));
     }
 }

@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS attendees (
     display_name TEXT,
     latitude REAL,
     longitude REAL,
+    map_x REAL,
+    map_y REAL,
     note TEXT,
     pov_image TEXT,
     side_image TEXT,
