@@ -116,10 +116,15 @@
             <section class="section-panel">
                 <div class="section-header">
                     <div>
-                        <p class="section-kicker">Database restore</p>
-                        <h2>Upload festival_finder.db</h2>
+                        <p class="section-kicker">Database backup</p>
+                        <h2>Export or restore</h2>
                     </div>
-                    <p class="section-header__meta">Replaces bands, check-ins, and favorites. A backup is saved first.</p>
+                    <p class="section-header__meta">Download the current database or replace it with a saved copy.</p>
+                </div>
+
+                <div class="inline-actions">
+                    <a class="secondary-button" href="{{ url_for('export_database') }}">Export database</a>
+                    <span class="helper-text">Downloads a fresh festival_finder.db snapshot.</span>
                 </div>
 
                 <form class="stack-form" method="post" action="{{ url_for('upload_database') }}" enctype="multipart/form-data">

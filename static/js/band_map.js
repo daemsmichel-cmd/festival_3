@@ -339,28 +339,35 @@
             }
 
             if (!isPhotoCompressionSupported()) {
-                setStatus("Uploading original photos.", "pending");
                 return;
             }
 
             event.preventDefault();
             setSubmitting(true);
-            setStatus("Compressing photos...", "pending");
+            setStatus("Preparing photos...", "pending");
 
             try {
                 for (const input of selectedPhotoInputs) {
-                    const compressedFile = await compressPhoto(input.files[0], maxEdge, quality);
-                    const dataTransfer = new DataTransfer();
-                    dataTransfer.items.add(compressedFile);
-                    input.files = dataTransfer.files;
+                    const sourceFile = input.files[0];
+                    if (!shouldCompressPhoto(sourceFile)) {
+                        continue;
+                    }
+
+                    try {
+                        const compressedFile = await compressPhoto(sourceFile, maxEdge, quality);
+                        const dataTransfer = new DataTransfer();
+                        dataTransfer.items.add(compressedFile);
+                        input.files = dataTransfer.files;
+                    } catch (error) {
+                        // Keep the original photo when the browser cannot decode it.
+                    }
                 }
 
                 form.dataset.photoCompressionComplete = "true";
-                setStatus("Photos ready. Uploading...", "success");
                 form.submit();
             } catch (error) {
-                setSubmitting(false);
-                setStatus("Could not compress photos. Try smaller images.", "error");
+                form.dataset.photoCompressionComplete = "true";
+                form.submit();
             }
         });
     });
@@ -380,6 +387,21 @@ function isPhotoCompressionSupported() {
             window.URL &&
             window.HTMLCanvasElement &&
             HTMLCanvasElement.prototype.toBlob
+    );
+}
+
+function shouldCompressPhoto(file) {
+    if (!file) {
+        return false;
+    }
+
+    const fileName = (file.name || "").toLowerCase();
+    const mimeType = (file.type || "").toLowerCase();
+    return !(
+        mimeType === "image/heic" ||
+        mimeType === "image/heif" ||
+        fileName.endsWith(".heic") ||
+        fileName.endsWith(".heif")
     );
 }
 

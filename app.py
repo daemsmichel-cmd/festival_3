@@ -5,6 +5,7 @@ import io
 import os
 import shutil
 import sqlite3
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,13 +20,17 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    send_file,
     session,
     url_for,
 )
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 from werkzeug.utils import secure_filename
 
-ALLOWED_IMAGE_EXTENSIONS = {"gif", "jpeg", "jpg", "png", "webp"}
+register_heif_opener()
+
+ALLOWED_IMAGE_EXTENSIONS = {"avif", "gif", "heic", "heif", "jpeg", "jpg", "png", "webp"}
 ALLOWED_TIMETABLE_EXTENSIONS = ALLOWED_IMAGE_EXTENSIONS | {"pdf"}
 ALLOWED_IMPORT_EXTENSIONS = {"csv", "txt"}
 ALLOWED_DATABASE_EXTENSIONS = {"db", "sqlite", "sqlite3"}
@@ -336,6 +341,42 @@ def create_app(test_config: dict | None = None) -> Flask:
         backup_path = backup_dir / f"festival_finder-{timestamp}-{uuid.uuid4().hex[:8]}.db"
         shutil.copy2(database_path, backup_path)
         return backup_path
+
+    def create_database_export_snapshot() -> io.BytesIO:
+        database_path = Path(app.config["DATABASE"])
+        if not database_path.exists():
+            raise ValueError("Database file not found.")
+
+        export_fd, export_name = tempfile.mkstemp(
+            prefix="festival_finder_export_",
+            suffix=".db",
+            dir=database_path.parent,
+        )
+        os.close(export_fd)
+        export_path = Path(export_name)
+
+        source_db = None
+        destination_db = None
+        try:
+            source_db = sqlite3.connect(database_path)
+            source_db.execute("PRAGMA foreign_keys = ON")
+            destination_db = sqlite3.connect(export_path)
+            source_db.backup(destination_db)
+            destination_db.commit()
+            export_buffer = io.BytesIO(export_path.read_bytes())
+            export_buffer.seek(0)
+            return export_buffer
+        except sqlite3.DatabaseError as exc:
+            raise ValueError("Could not export the database.") from exc
+        finally:
+            if destination_db is not None:
+                destination_db.close()
+            if source_db is not None:
+                source_db.close()
+            try:
+                export_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def get_owned_attendee_ids() -> set[int]:
         owned_ids = session.get("owned_attendee_ids", [])
@@ -1066,6 +1107,21 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/admin")
     def admin_page():
         return render_home("manage")
+
+    @app.get("/database/export")
+    def export_database():
+        try:
+            export_buffer = create_database_export_snapshot()
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index", tab="manage"))
+
+        return send_file(
+            export_buffer,
+            as_attachment=True,
+            download_name="festival_finder.db",
+            mimetype="application/x-sqlite3",
+        )
 
     @app.post("/database/upload")
     def upload_database():

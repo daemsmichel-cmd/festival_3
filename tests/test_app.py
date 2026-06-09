@@ -8,13 +8,24 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
+from pillow_heif import register_heif_opener
 
 from app import create_app, resolve_local_ssl_context
+
+
+register_heif_opener()
 
 
 def make_image_upload(size=(1800, 1200), color=(80, 120, 160), image_format="JPEG"):
     image_file = io.BytesIO()
     Image.new("RGB", size, color).save(image_file, format=image_format)
+    image_file.seek(0)
+    return image_file
+
+
+def make_heic_upload(size=(1800, 1200), color=(80, 120, 160)):
+    image_file = io.BytesIO()
+    Image.new("RGB", size, color).save(image_file, format="HEIF")
     image_file.seek(0)
     return image_file
 
@@ -239,7 +250,9 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Excel CSV import", response.data)
         self.assertIn(b"Upload single band", response.data)
-        self.assertIn(b"Upload festival_finder.db", response.data)
+        self.assertIn(b"Export database", response.data)
+        self.assertIn(b"Export or restore", response.data)
+        self.assertIn(b"Upload database", response.data)
         self.assertIn(b"Manage timetable", response.data)
         self.assertNotIn(b"Log out", response.data)
 
@@ -260,6 +273,46 @@ class FestivalFinderTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("/bands/1", response.headers["Location"])
+
+    def test_database_export_downloads_current_sqlite_database(self):
+        create_response = self.client.post(
+            "/bands",
+            data={
+                "band_name": "Export Signal",
+                "festival_name": "North Field",
+                "performance_date": "2026-08-19",
+                "start_time": "20:00",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(create_response.status_code, 302)
+
+        favorite_response = self.client.post(
+            "/bands/1/favorites",
+            data={"display_name": "Export Friend"},
+            follow_redirects=False,
+        )
+        self.assertEqual(favorite_response.status_code, 302)
+
+        response = self.client.get("/database/export")
+        self.assertEqual(response.status_code, 200)
+        content_disposition = response.headers["Content-Disposition"].lower()
+        self.assertIn("attachment", content_disposition)
+        self.assertIn("festival_finder.db", content_disposition)
+
+        with tempfile.NamedTemporaryFile(suffix=".db") as temp_export:
+            temp_export.write(response.data)
+            temp_export.flush()
+            exported_db = sqlite3.connect(temp_export.name)
+            self.assertEqual(
+                exported_db.execute("SELECT band_name FROM bands").fetchone()[0],
+                "Export Signal",
+            )
+            self.assertEqual(
+                exported_db.execute("SELECT display_name FROM favorites").fetchone()[0],
+                "Export Friend",
+            )
+            exported_db.close()
 
     def test_database_upload_replaces_database_and_saves_backup(self):
         band_response = self.client.post(
@@ -524,7 +577,7 @@ class FestivalFinderTestCase(unittest.TestCase):
                 "map_x": "42.500",
                 "map_y": "61.250",
                 "note": "Front-left barrier, close to the camera rail.",
-                "pov_image": (make_image_upload(size=(1800, 900), image_format="PNG"), "pov.png"),
+                "pov_image": (make_heic_upload(size=(1800, 900)), "pov.heic"),
                 "side_image": (make_image_upload(size=(900, 1800)), "side.jpg"),
             },
             content_type="multipart/form-data",
