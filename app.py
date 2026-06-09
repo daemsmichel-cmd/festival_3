@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import shutil
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from werkzeug.utils import secure_filename
 ALLOWED_IMAGE_EXTENSIONS = {"gif", "jpeg", "jpg", "png", "webp"}
 ALLOWED_TIMETABLE_EXTENSIONS = ALLOWED_IMAGE_EXTENSIONS | {"pdf"}
 ALLOWED_IMPORT_EXTENSIONS = {"csv", "txt"}
+ALLOWED_DATABASE_EXTENSIONS = {"db", "sqlite", "sqlite3"}
 ATTENDEE_PHOTO_JPEG_QUALITY = 60
 ATTENDEE_PHOTO_MAX_EDGE_PX = 1280
 DEFAULT_BAND_DURATION_MINUTES = 60
@@ -46,6 +48,11 @@ PUBLIC_DEPLOYMENT_ENV_VARS = (
     "RAILWAY_DEPLOYMENT_ID",
 )
 PRODUCTION_ENV_VALUES = {"prod", "production"}
+REQUIRED_DATABASE_COLUMNS = {
+    "bands": {"id", "band_name", "festival_name", "performance_date", "start_time"},
+    "attendees": {"id", "band_id", "created_at"},
+    "favorites": {"id", "band_id", "display_name", "created_at"},
+}
 
 
 def resolve_local_ssl_context(root_path: str | Path) -> tuple[str, str] | None:
@@ -239,6 +246,96 @@ def create_app(test_config: dict | None = None) -> Flask:
         )
         db.execute("DROP TABLE attendees_legacy")
         db.execute("CREATE INDEX IF NOT EXISTS idx_attendees_band_id ON attendees (band_id)")
+
+    def validate_database_upload(path: Path) -> dict[str, int]:
+        db = None
+        try:
+            db = sqlite3.connect(path)
+            db.execute("PRAGMA foreign_keys = ON")
+            quick_check = db.execute("PRAGMA quick_check").fetchone()
+            if quick_check is None or str(quick_check[0]).lower() != "ok":
+                raise ValueError("Database integrity check failed.")
+
+            tables = {
+                row[0]
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            missing_tables = set(REQUIRED_DATABASE_COLUMNS) - tables
+            if missing_tables:
+                names = ", ".join(sorted(missing_tables))
+                raise ValueError(f"Database is missing required tables: {names}.")
+
+            for table_name, required_columns in REQUIRED_DATABASE_COLUMNS.items():
+                columns = {
+                    row[1]
+                    for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()
+                }
+                missing_columns = required_columns - columns
+                if missing_columns:
+                    names = ", ".join(sorted(missing_columns))
+                    raise ValueError(f"Database table {table_name} is missing columns: {names}.")
+
+            with app.open_resource("schema.sql") as schema_file:
+                db.executescript(schema_file.read().decode("utf-8"))
+            migrate_attendees_schema(db)
+
+            foreign_key_errors = db.execute("PRAGMA foreign_key_check").fetchall()
+            if foreign_key_errors:
+                raise ValueError("Database has broken band, check-in, or favorite links.")
+
+            counts = {
+                "bands": db.execute("SELECT COUNT(*) FROM bands").fetchone()[0],
+                "attendees": db.execute("SELECT COUNT(*) FROM attendees").fetchone()[0],
+                "favorites": db.execute("SELECT COUNT(*) FROM favorites").fetchone()[0],
+            }
+            db.commit()
+            return counts
+        except sqlite3.DatabaseError as exc:
+            raise ValueError("Upload must be a valid SQLite database.") from exc
+        finally:
+            if db is not None:
+                db.close()
+
+    def save_database_upload(file_storage) -> tuple[Path, dict[str, int]]:
+        if file_storage is None or not file_storage.filename:
+            raise ValueError("Choose a festival_finder.db file to upload.")
+
+        original_name = secure_filename(file_storage.filename)
+        if not original_name or "." not in original_name:
+            raise ValueError("Database upload must include a file extension.")
+
+        extension = original_name.rsplit(".", 1)[1].lower()
+        if extension not in ALLOWED_DATABASE_EXTENSIONS:
+            allowed = ", ".join(sorted(ALLOWED_DATABASE_EXTENSIONS))
+            raise ValueError(f"Unsupported database file type. Allowed: {allowed}.")
+
+        database_path = Path(app.config["DATABASE"])
+        temporary_path = database_path.parent / f".database_upload_{uuid.uuid4().hex}.db"
+        try:
+            file_storage.save(temporary_path)
+            counts = validate_database_upload(temporary_path)
+        except (OSError, ValueError):
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+        return temporary_path, counts
+
+    def backup_current_database() -> Path | None:
+        database_path = Path(app.config["DATABASE"])
+        if not database_path.exists():
+            return None
+
+        backup_dir = database_path.parent / "database_backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        backup_path = backup_dir / f"festival_finder-{timestamp}-{uuid.uuid4().hex[:8]}.db"
+        shutil.copy2(database_path, backup_path)
+        return backup_path
 
     def get_owned_attendee_ids() -> set[int]:
         owned_ids = session.get("owned_attendee_ids", [])
@@ -969,6 +1066,45 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/admin")
     def admin_page():
         return render_home("manage")
+
+    @app.post("/database/upload")
+    def upload_database():
+        try:
+            replacement_path, counts = save_database_upload(request.files.get("database_file"))
+        except (OSError, ValueError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index", tab="manage"))
+
+        database_path = Path(app.config["DATABASE"])
+        backup_path = None
+        try:
+            close_db(None)
+            backup_path = backup_current_database()
+            replacement_path.replace(database_path)
+            init_db()
+        except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+            try:
+                replacement_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if backup_path is not None and backup_path.exists():
+                try:
+                    shutil.copy2(backup_path, database_path)
+                except OSError:
+                    pass
+            flash(f"Could not replace the database: {exc}", "error")
+            return redirect(url_for("index", tab="manage"))
+
+        backup_note = ""
+        if backup_path is not None:
+            backup_note = f" Backup saved at {backup_path.relative_to(database_path.parent).as_posix()}."
+        flash(
+            "Database uploaded. "
+            f"Loaded {counts['bands']} bands, {counts['attendees']} check-ins, and {counts['favorites']} favorites."
+            f"{backup_note}",
+            "success",
+        )
+        return redirect(url_for("index", tab="manage"))
 
     @app.get("/check-ins")
     def check_ins_page():

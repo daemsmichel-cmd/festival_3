@@ -19,6 +19,55 @@ def make_image_upload(size=(1800, 1200), color=(80, 120, 160), image_format="JPE
     return image_file
 
 
+def make_database_upload():
+    with tempfile.TemporaryDirectory() as root:
+        database_path = Path(root) / "festival_finder.db"
+        db = sqlite3.connect(database_path)
+        db.executescript(Path("schema.sql").read_text(encoding="utf-8"))
+        db.execute(
+            """
+            INSERT INTO bands (
+                id,
+                band_name,
+                festival_name,
+                stage_name,
+                performance_date,
+                start_time,
+                end_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                "Uploaded Signal",
+                "North Field",
+                "Main Stage",
+                "2026-08-20",
+                "19:00",
+                "20:00",
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO attendees (
+                band_id,
+                display_name,
+                map_x,
+                map_y
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (1, "Uploaded Check", 45.0, 55.0),
+        )
+        db.execute(
+            "INSERT INTO favorites (band_id, display_name) VALUES (?, ?)",
+            (1, "Uploaded Friend"),
+        )
+        db.commit()
+        db.close()
+        database_file = io.BytesIO(database_path.read_bytes())
+        database_file.seek(0)
+        return database_file
+
+
 class FestivalFinderTestCase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -190,6 +239,7 @@ class FestivalFinderTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Excel CSV import", response.data)
         self.assertIn(b"Upload single band", response.data)
+        self.assertIn(b"Upload festival_finder.db", response.data)
         self.assertIn(b"Manage timetable", response.data)
         self.assertNotIn(b"Log out", response.data)
 
@@ -210,6 +260,100 @@ class FestivalFinderTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("/bands/1", response.headers["Location"])
+
+    def test_database_upload_replaces_database_and_saves_backup(self):
+        band_response = self.client.post(
+            "/bands",
+            data={
+                "band_name": "Existing Signal",
+                "festival_name": "North Field",
+                "performance_date": "2026-08-19",
+                "start_time": "20:00",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(band_response.status_code, 302)
+
+        favorite_response = self.client.post(
+            "/bands/1/favorites",
+            data={"display_name": "Existing Friend"},
+            follow_redirects=False,
+        )
+        self.assertEqual(favorite_response.status_code, 302)
+
+        response = self.client.post(
+            "/database/upload",
+            data={
+                "database_file": (make_database_upload(), "festival_finder.db"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Database uploaded.", response.data)
+        self.assertIn(b"Loaded 1 bands, 1 check-ins, and 1 favorites.", response.data)
+
+        overview_response = self.client.get("/")
+        self.assertEqual(overview_response.status_code, 200)
+        self.assertIn(b"Uploaded Signal", overview_response.data)
+        self.assertNotIn(b"Existing Signal", overview_response.data)
+
+        db = sqlite3.connect(self.app.config["DATABASE"])
+        self.assertEqual(
+            db.execute("SELECT band_name FROM bands").fetchone()[0],
+            "Uploaded Signal",
+        )
+        self.assertEqual(
+            db.execute("SELECT display_name FROM favorites").fetchone()[0],
+            "Uploaded Friend",
+        )
+        db.close()
+
+        backup_files = sorted((Path(self.app.config["DATABASE"]).parent / "database_backups").glob("*.db"))
+        self.assertEqual(len(backup_files), 1)
+        backup_db = sqlite3.connect(backup_files[0])
+        self.assertEqual(
+            backup_db.execute("SELECT band_name FROM bands").fetchone()[0],
+            "Existing Signal",
+        )
+        self.assertEqual(
+            backup_db.execute("SELECT display_name FROM favorites").fetchone()[0],
+            "Existing Friend",
+        )
+        backup_db.close()
+
+    def test_database_upload_rejects_invalid_database_without_replacing_current_data(self):
+        band_response = self.client.post(
+            "/bands",
+            data={
+                "band_name": "Still Here",
+                "festival_name": "North Field",
+                "performance_date": "2026-08-19",
+                "start_time": "20:00",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(band_response.status_code, 302)
+
+        response = self.client.post(
+            "/database/upload",
+            data={
+                "database_file": (io.BytesIO(b"not a sqlite database"), "festival_finder.db"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Upload must be a valid SQLite database.", response.data)
+
+        db = sqlite3.connect(self.app.config["DATABASE"])
+        self.assertEqual(
+            db.execute("SELECT band_name FROM bands").fetchone()[0],
+            "Still Here",
+        )
+        db.close()
+        backup_dir = Path(self.app.config["DATABASE"]).parent / "database_backups"
+        self.assertFalse(backup_dir.exists())
 
     def test_homepage_groups_bands_by_stage_and_time(self):
         first_response = self.client.post(

@@ -116,6 +116,27 @@
             <section class="section-panel">
                 <div class="section-header">
                     <div>
+                        <p class="section-kicker">Database restore</p>
+                        <h2>Upload festival_finder.db</h2>
+                    </div>
+                    <p class="section-header__meta">Replaces bands, check-ins, and favorites. A backup is saved first.</p>
+                </div>
+
+                <form class="stack-form" method="post" action="{{ url_for('upload_database') }}" enctype="multipart/form-data">
+                    <label class="field">
+                        <span>SQLite database</span>
+                        <input type="file" name="database_file" accept=".db,.sqlite,.sqlite3" required>
+                    </label>
+
+                    <button class="secondary-button danger-button" type="submit">Upload database</button>
+                </form>
+            </section>
+        </section>
+
+        <section class="shell detail-stack">
+            <section class="section-panel">
+                <div class="section-header">
+                    <div>
                         <p class="section-kicker">Delete stage</p>
                         <h2>Stage lanes</h2>
                     </div>
