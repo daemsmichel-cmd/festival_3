@@ -6,7 +6,7 @@
     <section class="detail-band">
         <div class="shell detail-band__inner detail-band__inner--simple">
             <div>
-                <a class="back-link" href="{{ url_for('index') }}">Back to all bands</a>
+                <a class="back-link" href="{{ url_for('index', tab='overview') }}">Back to all bands</a>
                 <h1>{{ band["band_name"] }}</h1>
                 <p class="detail-band__meta">{{ band["favorite_count"] }} favorites · {{ band["attendee_count"] }} crowd check-ins</p>
             </div>

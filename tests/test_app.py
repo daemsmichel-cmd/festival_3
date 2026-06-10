@@ -613,6 +613,7 @@ class FestivalFinderTestCase(unittest.TestCase):
 
         band_detail_response = self.client.get("/bands/1")
         self.assertEqual(band_detail_response.status_code, 200)
+        self.assertIn(b'href="/?tab=overview"', band_detail_response.data)
         self.assertIn(b"Open map", band_detail_response.data)
         self.assertIn(b"Exit crowd", band_detail_response.data)
         self.assertIn(b"--pin-x: 42.5%; --pin-y: 61.25%;", band_detail_response.data)
