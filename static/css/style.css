@@ -733,27 +733,28 @@ textarea {
     left: var(--pin-x, 50%);
     top: var(--pin-y, 50%);
     z-index: 2;
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
     padding: 0;
-    border: 3px solid #ffffff;
+    border: 2px solid #ffffff;
     border-radius: 999px;
     background: var(--rust);
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
     transform: translate(-50%, -100%);
     color: var(--text);
     font: inherit;
+    touch-action: manipulation;
 }
 
 .festival-map__pin::after {
     content: "";
     position: absolute;
     left: 50%;
-    bottom: -8px;
-    width: 8px;
-    height: 8px;
-    border-right: 3px solid #ffffff;
-    border-bottom: 3px solid #ffffff;
+    bottom: -7px;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid #ffffff;
+    border-bottom: 2px solid #ffffff;
     border-radius: 0 0 2px 0;
     background: inherit;
     transform: translateX(-50%) rotate(45deg);

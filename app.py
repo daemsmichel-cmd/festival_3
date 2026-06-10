@@ -133,13 +133,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         or default_data_root / "uploads"
     )
 
-    max_upload_mb = int(os.environ.get("MAX_CONTENT_LENGTH_MB", "24"))
+    max_upload_mb = int(os.environ.get("MAX_CONTENT_LENGTH_MB", "48"))
     app.config.from_mapping(
         SECRET_KEY=test_config.get("SECRET_KEY")
         or os.environ.get("SECRET_KEY")
         or DEFAULT_SECRET_KEY,
         DATABASE=str(database_path),
         UPLOAD_ROOT=str(upload_root),
+        MAX_CONTENT_LENGTH_MB=max_upload_mb,
         MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -1064,7 +1065,10 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.errorhandler(413)
     def file_too_large(_error):
-        flash("Upload too large. Keep files under 24 MB.", "error")
+        flash(
+            f"Upload too large. Keep files under {app.config['MAX_CONTENT_LENGTH_MB']} MB.",
+            "error",
+        )
         return redirect(request.referrer or url_for("index"))
 
     def render_home(active_tab: str) -> str:
